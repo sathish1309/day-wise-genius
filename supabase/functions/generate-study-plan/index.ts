@@ -136,12 +136,25 @@ Generate a complete, structured study plan with specific time slots for each day
 
     // Extract JSON from the response (handle markdown code blocks)
     let jsonStr = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+    
+    // Remove markdown code blocks if present - try multiple patterns
+    if (jsonStr.includes("```")) {
+      // Match ```json ... ``` or ``` ... ```
+      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch && jsonMatch[1]) {
+        jsonStr = jsonMatch[1];
+      } else {
+        // Fallback: just remove all backticks and "json" prefix
+        jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```/g, '');
+      }
     }
+    
+    // Trim whitespace
+    jsonStr = jsonStr.trim();
+    
+    console.log("Cleaned JSON string (first 200 chars):", jsonStr.substring(0, 200));
 
-    const plan = JSON.parse(jsonStr.trim());
+    const plan = JSON.parse(jsonStr);
 
     console.log("Study plan generated successfully");
 
