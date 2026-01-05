@@ -5,9 +5,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface SubjectWithGoals {
+  name: string;
+  goals: string;
+}
+
 interface StudyPlanRequest {
   studentName: string;
-  subjects: string[];
+  subjects: SubjectWithGoals[];
   dailyStudyHours: number;
   totalDays: number;
   difficulty: "easy" | "medium" | "hard";
@@ -29,63 +34,46 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
+    // Build subject list with goals for the prompt
+    const subjectDetails = subjects
+      .map((s) => {
+        if (s.goals) {
+          return `- ${s.name}: Goals/Topics → ${s.goals}`;
+        }
+        return `- ${s.name}`;
+      })
+      .join("\n");
+
     const systemPrompt = `You are an expert AI study planner that creates detailed, practical study schedules.
     
 Your task is to create a comprehensive day-by-day study plan following these rules:
 1. Distribute workload evenly across all available days
-2. Allocate MORE time to difficult subjects (if difficulty is "hard", prioritize challenging subjects)
-3. Include 10-15 minute breaks after every 45-60 minutes of study
-4. Make the schedule realistic and easy to follow
-5. Start each day at a reasonable time (e.g., 9:00 AM)
-6. Consider the difficulty level to adjust intensity:
+2. Allocate MORE time to subjects with more goals/chapters/topics to cover
+3. For subjects with specific topics listed, break down study sessions by topic and include the topic name in each time block
+4. Include 10-15 minute breaks after every 45-60 minutes of study
+5. Make the schedule realistic and easy to follow
+6. Start each day at a reasonable time (e.g., 9:00 AM)
+7. Consider the difficulty level to adjust intensity:
    - Easy: More breaks, shorter sessions, lighter topics first
    - Medium: Balanced approach, mix of challenging and lighter topics
    - Hard: Intensive focus, longer sessions, tackle difficult topics when energy is highest
-
-ALWAYS respond with valid JSON in this exact structure:
-{
-  "studentName": "string",
-  "totalDays": number,
-  "dailyHours": number,
-  "difficulty": "string",
-  "schedule": [
-    {
-      "day": 1,
-      "date": "Day 1",
-      "subjects": [
-        {
-          "subject": "Subject Name",
-          "duration": "1h 30m",
-          "startTime": "09:00",
-          "endTime": "10:30"
-        }
-      ],
-      "breaks": [
-        { "duration": "15 min", "afterSubject": "Subject Name" }
-      ],
-      "totalStudyTime": "4h"
-    }
-  ],
-  "summary": {
-    "subjectAllocation": [
-      { "subject": "Subject Name", "totalHours": 10, "percentage": 25 }
-    ],
-    "tips": [
-      "Study tip 1",
-      "Study tip 2",
-      "Study tip 3"
-    ]
-  }
-}`;
+8. If goals/topics are provided, ensure all listed topics are covered across the plan`;
 
     const userPrompt = `Create a ${totalDays}-day study plan for ${studentName} with these details:
 
-Subjects to study: ${subjects.join(", ")}
+Subjects and Goals:
+${subjectDetails}
+
 Daily study hours available: ${dailyStudyHours} hours
 Total days available: ${totalDays} days
 Difficulty/Intensity level: ${difficulty}
 
-Generate a complete, structured study plan with specific time slots for each day. Include breaks and ensure balanced coverage of all subjects.`;
+IMPORTANT: 
+- Allocate more time to subjects with more topics/goals listed
+- Include the specific topic being studied in each time block when available
+- Ensure complete coverage of all listed goals/topics by the end of the plan
+
+Generate a complete, structured study plan with specific time slots for each day. Include breaks and ensure balanced coverage of all subjects and their topics.`;
 
     const systemPromptWithTools = `${systemPrompt}
 
@@ -124,6 +112,7 @@ IMPORTANT:
                           duration: { type: "string" },
                           startTime: { type: "string" },
                           endTime: { type: "string" },
+                          topic: { type: "string", description: "Specific chapter or topic being covered" },
                         },
                         required: ["subject", "duration", "startTime", "endTime"],
                         additionalProperties: false,
@@ -205,21 +194,21 @@ IMPORTANT:
     if (!response.ok) {
       const errorText = await response.text();
       console.error("AI gateway error:", response.status, errorText);
-      
+
       if (response.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      
+
       if (response.status === 402) {
         return new Response(
           JSON.stringify({ error: "AI credits depleted. Please add credits." }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      
+
       throw new Error(`AI gateway error: ${response.status}`);
     }
 
@@ -281,7 +270,6 @@ IMPORTANT:
       JSON.stringify({ plan }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-
   } catch (error) {
     console.error("Error generating study plan:", error);
     return new Response(
