@@ -87,6 +87,102 @@ Difficulty/Intensity level: ${difficulty}
 
 Generate a complete, structured study plan with specific time slots for each day. Include breaks and ensure balanced coverage of all subjects.`;
 
+    const systemPromptWithTools = `${systemPrompt}
+
+IMPORTANT:
+- You MUST call the tool "generate_study_plan" to produce the response.
+- Do NOT wrap anything in \`\`\` fences.
+- Do NOT include extra commentary outside the tool call.`;
+
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "generate_study_plan",
+          description:
+            "Generate a day-by-day study plan with time blocks, breaks, and a summary allocation.",
+          parameters: {
+            type: "object",
+            properties: {
+              studentName: { type: "string" },
+              totalDays: { type: "number" },
+              dailyHours: { type: "number" },
+              difficulty: { type: "string", enum: ["easy", "medium", "hard"] },
+              schedule: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    day: { type: "number" },
+                    date: { type: "string" },
+                    subjects: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          subject: { type: "string" },
+                          duration: { type: "string" },
+                          startTime: { type: "string" },
+                          endTime: { type: "string" },
+                        },
+                        required: ["subject", "duration", "startTime", "endTime"],
+                        additionalProperties: false,
+                      },
+                    },
+                    breaks: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          duration: { type: "string" },
+                          afterSubject: { type: "string" },
+                        },
+                        required: ["duration", "afterSubject"],
+                        additionalProperties: false,
+                      },
+                    },
+                    totalStudyTime: { type: "string" },
+                  },
+                  required: ["day", "date", "subjects", "breaks", "totalStudyTime"],
+                  additionalProperties: false,
+                },
+              },
+              summary: {
+                type: "object",
+                properties: {
+                  subjectAllocation: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        subject: { type: "string" },
+                        totalHours: { type: "number" },
+                        percentage: { type: "number" },
+                      },
+                      required: ["subject", "totalHours", "percentage"],
+                      additionalProperties: false,
+                    },
+                  },
+                  tips: { type: "array", items: { type: "string" } },
+                },
+                required: ["subjectAllocation", "tips"],
+                additionalProperties: false,
+              },
+            },
+            required: [
+              "studentName",
+              "totalDays",
+              "dailyHours",
+              "difficulty",
+              "schedule",
+              "summary",
+            ],
+            additionalProperties: false,
+          },
+        },
+      },
+    ];
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -96,11 +192,13 @@ Generate a complete, structured study plan with specific time slots for each day
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
+          { role: "system", content: systemPromptWithTools },
+          { role: "user", content: userPrompt },
         ],
-        temperature: 0.7,
-        max_tokens: 4000,
+        tools,
+        tool_choice: { type: "function", function: { name: "generate_study_plan" } },
+        temperature: 0.2,
+        max_tokens: 8000,
       }),
     });
 
@@ -126,35 +224,56 @@ Generate a complete, structured study plan with specific time slots for each day
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    const message = data.choices?.[0]?.message;
 
-    if (!content) {
-      throw new Error("No content in AI response");
-    }
+    let plan: unknown;
 
-    console.log("AI response received, parsing...");
-
-    // Extract JSON from the response (handle markdown code blocks)
-    let jsonStr = content;
-    
-    // Remove markdown code blocks if present - try multiple patterns
-    if (jsonStr.includes("```")) {
-      // Match ```json ... ``` or ``` ... ```
-      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch && jsonMatch[1]) {
-        jsonStr = jsonMatch[1];
-      } else {
-        // Fallback: just remove all backticks and "json" prefix
-        jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```/g, '');
+    // Preferred: tool calling (reliable structured output)
+    const toolArgs = message?.tool_calls?.[0]?.function?.arguments;
+    if (toolArgs) {
+      plan = typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs;
+      console.log("Study plan parsed from tool call");
+    } else {
+      // Fallback: content parsing (best effort)
+      const content = message?.content;
+      if (!content) {
+        console.error(
+          "AI response missing both tool_calls and content (first 1k chars):",
+          JSON.stringify(data).slice(0, 1000)
+        );
+        throw new Error("AI response did not include a study plan");
       }
-    }
-    
-    // Trim whitespace
-    jsonStr = jsonStr.trim();
-    
-    console.log("Cleaned JSON string (first 200 chars):", jsonStr.substring(0, 200));
 
-    const plan = JSON.parse(jsonStr);
+      console.log("AI response received (fallback content), parsing...");
+
+      let jsonStr = content;
+
+      // Remove markdown code blocks if present
+      if (jsonStr.includes("```")) {
+        const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (jsonMatch && jsonMatch[1]) {
+          jsonStr = jsonMatch[1];
+        } else {
+          jsonStr = jsonStr.replace(/```json\s*/g, "").replace(/```/g, "");
+        }
+      }
+
+      jsonStr = jsonStr.trim();
+
+      // Extra cleanup: take only the outermost JSON object if the model adds text
+      const firstBrace = jsonStr.indexOf("{");
+      const lastBrace = jsonStr.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+      }
+
+      console.log(
+        "Cleaned JSON string (first 200 chars):",
+        jsonStr.substring(0, 200)
+      );
+
+      plan = JSON.parse(jsonStr);
+    }
 
     console.log("Study plan generated successfully");
 
