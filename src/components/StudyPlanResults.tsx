@@ -24,7 +24,8 @@ const StudyPlanResults = ({ plan }: StudyPlanResultsProps) => {
     plan.schedule.forEach((day) => {
       content += `\nDay ${day.day} - ${day.date}\n`;
       day.subjects.forEach((block) => {
-        content += `  ${block.startTime} - ${block.endTime}: ${block.subject} (${block.duration})\n`;
+        const topicStr = block.topic ? ` - ${block.topic}` : "";
+        content += `  ${block.startTime} - ${block.endTime}: ${block.subject}${topicStr} (${block.duration})\n`;
       });
       if (day.breaks.length > 0) {
         content += `  Breaks: ${day.breaks.map((b) => `${b.duration} after ${b.afterSubject}`).join(", ")}\n`;
@@ -133,6 +134,9 @@ const StudyPlanResults = ({ plan }: StudyPlanResultsProps) => {
                     <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{block.subject}</p>
+                      {block.topic && (
+                        <p className="text-xs text-accent-foreground truncate">{block.topic}</p>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         {block.startTime} - {block.endTime}
                       </p>
@@ -185,8 +189,9 @@ const StudyPlanResults = ({ plan }: StudyPlanResultsProps) => {
                           <span
                             key={j}
                             className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-md"
+                            title={block.topic || undefined}
                           >
-                            {block.subject} ({block.startTime})
+                            {block.subject}{block.topic ? `: ${block.topic}` : ""} ({block.startTime})
                           </span>
                         ))}
                       </div>

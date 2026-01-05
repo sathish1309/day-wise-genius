@@ -1,6 +1,11 @@
+export interface SubjectWithGoals {
+  name: string;
+  goals: string; // chapters, topics, or specific goals
+}
+
 export interface StudyFormData {
   studentName: string;
-  subjects: string;
+  subjects: SubjectWithGoals[];
   dailyStudyHours: number;
   totalDays: number;
   difficulty: 'easy' | 'medium' | 'hard';
@@ -11,6 +16,7 @@ export interface TimeBlock {
   duration: string;
   startTime: string;
   endTime: string;
+  topic?: string; // specific topic/chapter being covered
 }
 
 export interface StudyDay {

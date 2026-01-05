@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Plus, X, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -22,17 +22,24 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { StudyFormData, StudyPlan } from "@/types/studyPlan";
+import { StudyPlan } from "@/types/studyPlan";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+const subjectSchema = z.object({
+  name: z.string().min(1, "Subject name is required").max(100),
+  goals: z.string().max(500).optional(),
+});
+
 const formSchema = z.object({
-  studentName: z.string().min(2, "Name must be at least 2 characters"),
-  subjects: z.string().min(3, "Please enter at least one subject"),
+  studentName: z.string().min(2, "Name must be at least 2 characters").max(100),
+  subjects: z.array(subjectSchema).min(1, "Add at least one subject"),
   dailyStudyHours: z.coerce.number().min(1, "Minimum 1 hour").max(12, "Maximum 12 hours"),
   totalDays: z.coerce.number().min(1, "Minimum 1 day").max(90, "Maximum 90 days"),
   difficulty: z.enum(["easy", "medium", "hard"]),
 });
+
+type FormValues = z.infer<typeof formSchema>;
 
 interface StudyPlannerFormProps {
   onPlanGenerated: (plan: StudyPlan) => void;
@@ -41,24 +48,34 @@ interface StudyPlannerFormProps {
 const StudyPlannerForm = ({ onPlanGenerated }: StudyPlannerFormProps) => {
   const [isLoading, setIsLoading] = useState(false);
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       studentName: "",
-      subjects: "",
+      subjects: [{ name: "", goals: "" }],
       dailyStudyHours: 4,
       totalDays: 7,
       difficulty: "medium",
     },
   });
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "subjects",
+  });
+
+  const onSubmit = async (values: FormValues) => {
     setIsLoading(true);
-    
+
     try {
-      const subjects = values.subjects.split(",").map((s) => s.trim()).filter(Boolean);
-      
-      if (subjects.length === 0) {
+      const validSubjects = values.subjects
+        .filter((s) => s.name.trim())
+        .map((s) => ({
+          name: s.name.trim(),
+          goals: s.goals?.trim() || "",
+        }));
+
+      if (validSubjects.length === 0) {
         toast.error("Please enter at least one subject");
         setIsLoading(false);
         return;
@@ -67,7 +84,7 @@ const StudyPlannerForm = ({ onPlanGenerated }: StudyPlannerFormProps) => {
       const { data, error } = await supabase.functions.invoke("generate-study-plan", {
         body: {
           studentName: values.studentName,
-          subjects,
+          subjects: validSubjects,
           dailyStudyHours: values.dailyStudyHours,
           totalDays: values.totalDays,
           difficulty: values.difficulty,
@@ -128,25 +145,88 @@ const StudyPlannerForm = ({ onPlanGenerated }: StudyPlannerFormProps) => {
             )}
           />
 
-          <FormField
-            control={form.control}
-            name="subjects"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Subjects</FormLabel>
-                <FormControl>
-                  <Input
-                    placeholder="Mathematics, Physics, Chemistry, Biology"
-                    {...field}
-                  />
-                </FormControl>
-                <FormDescription>
-                  Enter subjects separated by commas
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
+          {/* Subjects with Goals */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <FormLabel className="text-base">Subjects & Goals</FormLabel>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => append({ name: "", goals: "" })}
+                disabled={fields.length >= 10}
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Add Subject
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {fields.map((field, index) => (
+                <div
+                  key={field.id}
+                  className="p-4 border border-border rounded-xl bg-muted/30 space-y-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 mt-1">
+                      <BookOpen className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="flex-1 space-y-3">
+                      <FormField
+                        control={form.control}
+                        name={`subjects.${index}.name`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <Input
+                                placeholder="Subject name (e.g., Mathematics)"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`subjects.${index}.goals`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <Textarea
+                                placeholder="Goals: Chapters, topics, or specific areas to cover (e.g., Chapters 1-5: Algebra, Quadratic equations, Polynomials)"
+                                className="min-h-[60px] resize-none"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormDescription className="text-xs">
+                              Optional: Add chapters or topics for smarter time allocation
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    {fields.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => remove(index)}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {form.formState.errors.subjects?.message && (
+              <p className="text-sm text-destructive">
+                {form.formState.errors.subjects.message}
+              </p>
             )}
-          />
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <FormField
@@ -156,12 +236,7 @@ const StudyPlannerForm = ({ onPlanGenerated }: StudyPlannerFormProps) => {
                 <FormItem>
                   <FormLabel>Daily Study Hours</FormLabel>
                   <FormControl>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={12}
-                      {...field}
-                    />
+                    <Input type="number" min={1} max={12} {...field} />
                   </FormControl>
                   <FormDescription>Hours per day (1-12)</FormDescription>
                   <FormMessage />
@@ -176,12 +251,7 @@ const StudyPlannerForm = ({ onPlanGenerated }: StudyPlannerFormProps) => {
                 <FormItem>
                   <FormLabel>Total Days Available</FormLabel>
                   <FormControl>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={90}
-                      {...field}
-                    />
+                    <Input type="number" min={1} max={90} {...field} />
                   </FormControl>
                   <FormDescription>Number of days (1-90)</FormDescription>
                   <FormMessage />
